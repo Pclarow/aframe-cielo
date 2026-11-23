@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Módulo 03 · Cielo de Atacama en A-Frame</title>
+<script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+<script>
+  // Campo de estrellas generado con un componente propio
+  AFRAME.registerComponent('estrellas', {
+    schema: { cantidad: { default: 900 } },
+    init(){
+      for (let i = 0; i < this.data.cantidad; i++){
+        const s = document.createElement('a-sphere');
+        const th = Math.random() * Math.PI * 2, ph = Math.acos(Math.random() * 0.95), r = 80;
+        s.setAttribute('position', `${r * Math.sin(ph) * Math.cos(th)} ${r * Math.cos(ph)} ${r * Math.sin(ph) * Math.sin(th)}`);
+        s.setAttribute('radius', 0.08 + Math.random() * 0.18);
+        s.setAttribute('material', `shader: flat; color: ${Math.random() < 0.15 ? '#ffd9a8' : '#ffffff'}`);
+        this.el.appendChild(s);
+      }
+    }
+  });
+
+  // Hotspot: al mirarlo (o hacer clic) se enciende, suena y muestra su texto
+  AFRAME.registerComponent('hotspot', {
+    schema: { texto: { type: 'string' }, nota: { default: 440 } },
+    init(){
+      const el = this.el, panel = document.querySelector('#panel');
+      el.addEventListener('mouseenter', () => el.setAttribute('scale', '1.3 1.3 1.3'));
+      el.addEventListener('mouseleave', () => el.setAttribute('scale', '1 1 1'));
+      el.addEventListener('click', () => {
+        panel.setAttribute('value', this.data.texto);
+        panel.setAttribute('visible', true);
+        el.setAttribute('material', 'color', '#ffd166');
+        try {
+          const ctx = window._actx || (window._actx = new AudioContext());
+          const o = ctx.createOscillator(), g = ctx.createGain(), t = ctx.currentTime;
+          o.frequency.value = this.data.nota; o.type = 'sine';
+          g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.15, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.2);
+          o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 1.3);
+        } catch(e){}
+      });
+    }
+  });
+</script>
+</head>
+<body>
+<a-scene background="color: #050814" renderer="antialias: true">
+  <a-entity estrellas="cantidad: 900"></a-entity>
+
+  <!-- Suelo del desierto y cerros -->
+  <a-circle rotation="-90 0 0" radius="60" material="color: #3b2716; shader: flat"></a-circle>
+  <a-cone position="-18 3 -30" radius-bottom="12" radius-top="0" height="8" material="color: #24170d; shader: flat"></a-cone>
+  <a-cone position="20 2.5 -26" radius-bottom="10" radius-top="0" height="6" material="color: #24170d; shader: flat"></a-cone>
+  <a-cone position="2 2 32" radius-bottom="14" radius-top="0" height="5" material="color: #24170d; shader: flat"></a-cone>
+
+  <!-- Cúpula de observatorio -->
+  <a-cylinder position="6 1.2 -12" radius="2.2" height="2.4" material="color: #d9d9d9"></a-cylinder>
+  <a-sphere position="6 2.4 -12" radius="2.2" theta-length="90" material="color: #efefef"></a-sphere>
+
+  <!-- Hotspots: mirar 1,5 s para activar -->
+  <a-sphere class="clickable" position="-6 9 -14" radius="0.9" material="color: #6fd3ff; emissive: #6fd3ff; emissiveIntensity: 0.6"
+            hotspot="nota: 523; texto: Cielo limpio: el norte de Chile tiene algunos de los cielos más despejados y secos del planeta."></a-sphere>
+  <a-sphere class="clickable" position="8 12 -10" radius="0.9" material="color: #ff8fb1; emissive: #ff8fb1; emissiveIntensity: 0.6"
+            hotspot="nota: 659; texto: Por eso el desierto de Atacama alberga grandes observatorios astronómicos internacionales."></a-sphere>
+  <a-sphere class="clickable" position="0 14 12" radius="0.9" material="color: #b39dff; emissive: #b39dff; emissiveIntensity: 0.6"
+            hotspot="nota: 784; texto: Gira la cabeza o arrastra la vista: este cielo es una escena 3D hecha con A-Frame."></a-sphere>
+
+  <!-- Panel de texto -->
+  <a-text id="panel" value="Mira una esfera de color para descubrirla" position="0 3.2 -6" align="center" width="7" color="#ffffff"
+          wrap-count="38" material="color: #000"></a-text>
+
+  <!-- Cámara con cursor de mirada (gaze) -->
+  <a-entity camera look-controls wasd-controls="enabled: false" position="0 1.6 0">
+    <a-entity cursor="fuse: true; fuseTimeout: 1500" raycaster="objects: .clickable"
+              position="0 0 -1" geometry="primitive: ring; radiusInner: 0.012; radiusOuter: 0.02"
+              material="color: #ffffff; shader: flat"
+              animation__fusing="property: scale; startEvents: fusing; easing: easeInCubic; dur: 1500; from: 1 1 1; to: 0.3 0.3 0.3"
+              animation__leave="property: scale; startEvents: mouseleave; dur: 200; to: 1 1 1"></a-entity>
+  </a-entity>
+</a-scene>
+</body>
+</html>
