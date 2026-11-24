@@ -68,8 +68,7 @@
       this.inicio = document.querySelector('#inicio');
       this.textoVR = document.querySelector('#textoVR');
       this.hudVR = document.querySelector('#hudVR');
-      this.manos = [...document.querySelectorAll('.mano')];   // controles con bate
-      this.puntaAnterior = new Map();                           // para medir la velocidad del swing
+      this.batesVR = [];                 // bates pegados a los controles del visor
       this.modoVR = false;
 
       this.geo = new THREE.IcosahedronGeometry(0.45, 0);
@@ -83,30 +82,71 @@
 
       // ----- realidad virtual -----
       this.el.addEventListener('enter-vr', () => {
+        if (!this.el.is('vr-mode')) return;
         this.modoVR = true;
-        this.hudVR.setAttribute('visible', true);
         this.inicio.style.display = 'none';
+        this.hudVR.setAttribute('visible', true);
         document.querySelector('#bate').setAttribute('visible', false);   // el bate de pantalla no se usa en VR
-        if (!this.jugando) this.textoVR.setAttribute('visible', true);
+        document.querySelector('#mira').setAttribute('visible', false);
+        this.prepararControles();
+        if (!this.jugando) this.cuentaRegresiva('METEORITOS EN ATACAMA. Batea moviendo el brazo. Empieza en', 3);
       });
       this.el.addEventListener('exit-vr', () => {
         this.modoVR = false;
         this.hudVR.setAttribute('visible', false);
         document.querySelector('#bate').setAttribute('visible', true);
+        document.querySelector('#mira').setAttribute('visible', true);
         this.textoVR.setAttribute('visible', false);
+        clearInterval(this.timerCuenta);
         if (!this.jugando) this.inicio.style.display = 'flex';
       });
-      // los bates de VR solo se ven cuando hay un control conectado
-      this.manos.forEach((mano) => {
-        mano.setAttribute('visible', false);
-        mano.addEventListener('controllerconnected', () => mano.setAttribute('visible', true));
-        mano.addEventListener('controllerdisconnected', () => mano.setAttribute('visible', false));
-      });
-      // gatillo del control: empezar / volver a jugar
-      this.manos.forEach((mano) => mano.addEventListener('triggerdown', () => { if (!this.jugando) this.empezar(); }));
+    },
+
+    // crea un bate en cada control del visor (sirve para mano izquierda y derecha)
+    prepararControles() {
+      if (this.batesVR.length) return;
+      const xr = this.el.renderer.xr;
+      for (let i = 0; i < 2; i++) {
+        const agarre = xr.getControllerGrip(i);      // posición de la mano que sostiene el control
+        const bate = new THREE.Group();
+        const mango = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.24, 12), new THREE.MeshBasicMaterial({ color: 0x3a2414 }));
+        mango.rotation.x = -Math.PI / 2; mango.position.z = -0.08;
+        const cuerpo = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.03, 0.62, 16), new THREE.MeshBasicMaterial({ color: 0xc8924f }));
+        cuerpo.rotation.x = -Math.PI / 2; cuerpo.position.z = -0.5;
+        const punta = new THREE.Object3D(); punta.position.z = -0.82;
+        bate.add(mango, cuerpo, punta);
+        bate.rotation.x = -Math.PI / 4;              // inclinado como se toma un bate
+        agarre.add(bate);
+        this.el.object3D.add(agarre);
+        const datos = { agarre, punta, anterior: null, entrada: null };
+        agarre.addEventListener('connected', (e) => { datos.entrada = e.data; });
+        agarre.addEventListener('disconnected', () => { datos.entrada = null; });
+        // gatillo de cualquier control: empezar al tiro
+        const control = xr.getController(i);
+        control.addEventListener('selectstart', () => { if (!this.jugando) { clearInterval(this.timerCuenta); this.empezar(); } });
+        this.el.object3D.add(control);
+        this.batesVR.push(datos);
+      }
+    },
+
+    // muestra un texto en VR con cuenta regresiva y luego empieza solo
+    cuentaRegresiva(texto, segundos) {
+      clearInterval(this.timerCuenta);
+      let n = segundos;
+      const mostrar = () => {
+        this.textoVR.setAttribute('value', texto + ' ' + n + '...');
+        this.textoVR.setAttribute('visible', true);
+      };
+      mostrar();
+      this.timerCuenta = setInterval(() => {
+        n -= 1;
+        if (n <= 0) { clearInterval(this.timerCuenta); if (this.modoVR && !this.jugando) this.empezar(); }
+        else mostrar();
+      }, 1000);
     },
 
     empezar() {
+      clearInterval(this.timerCuenta);
       sonido('golpe');
       this.meteoritos.forEach((m) => this.el.object3D.remove(m.malla));
       this.meteoritos = [];
@@ -204,13 +244,13 @@
 
     // VR: el bate es un segmento desde el control hasta la punta; si toca un meteorito, lo golpea
     bateoVR(dt) {
-      for (const mano of this.manos) {
-        const punta = mano.querySelector('.punta').object3D;
-        const a = new THREE.Vector3(); mano.object3D.getWorldPosition(a);
-        const b = new THREE.Vector3(); punta.getWorldPosition(b);
-        const antes = this.puntaAnterior.get(mano) || b.clone();
+      for (const bate of this.batesVR) {
+        if (!bate.entrada) continue;                  // ese control no está conectado
+        const a = new THREE.Vector3(); bate.agarre.getWorldPosition(a);
+        const b = new THREE.Vector3(); bate.punta.getWorldPosition(b);
+        const antes = bate.anterior || b.clone();
         const velPunta = b.clone().sub(antes).divideScalar(Math.max(dt, 0.001));
-        this.puntaAnterior.set(mano, b.clone());
+        bate.anterior = b.clone();
         if (velPunta.length() < 1.2) continue;        // hay que hacer el swing, no solo tocarlo
         const linea = new THREE.Line3(a, b);
         const cercano = new THREE.Vector3();
@@ -222,7 +262,7 @@
             const vel = velPunta.clone().normalize().multiplyScalar(10 + fuerza * 3).add(new THREE.Vector3(0, 8, 0));
             this.golpear(m, vel, fuerza > 6);
             // vibración del control
-            try { mano.components['tracked-controls'].controller.gamepad.hapticActuators[0].pulse(1, 90); } catch (e) {}
+            try { bate.entrada.gamepad.hapticActuators[0].pulse(1, 90); } catch (e) {}
           }
         }
       }
@@ -250,10 +290,8 @@
       this.jugando = false;
       this.inicio.innerHTML = '<h1>Fin del juego</h1><p>Bateaste meteoritos por <b>' + this.puntos +
         '</b> puntos.</p><div class="btn">Jugar de nuevo</div>';
-      if (this.modoVR) {
-        this.textoVR.setAttribute('value', 'FIN DEL JUEGO - ' + this.puntos + ' puntos. Aprieta el gatillo para jugar de nuevo');
-        this.textoVR.setAttribute('visible', true);
-      } else this.inicio.style.display = 'flex';
+      if (this.modoVR) this.cuentaRegresiva('FIN DEL JUEGO: ' + this.puntos + ' puntos. Nueva partida en', 10);
+      else this.inicio.style.display = 'flex';
     },
 
     tick(t, dtMs) {
@@ -318,33 +356,22 @@
   <a-sphere position="6 2.4 -12" radius="2.2" theta-length="90" material="color: #efefef"></a-sphere>
 
   <!-- Cámara del jugador con el bate en la mano -->
-  <a-entity id="camara" camera look-controls wasd-controls="enabled: false" position="0 1.6 0">
+  <a-entity id="camara" camera look-controls="reverseMouseDrag: true" wasd-controls="enabled: false" position="0 1.6 0">
     <a-entity id="bate" position="0.16 -0.26 -0.42">
       <!-- el bate apunta hacia +X dentro del pivote -->
       <a-cylinder position="0.12 0 0" rotation="0 0 90" radius="0.022" height="0.24" material="color: #3a2414"></a-cylinder>
       <a-cone position="0.52 0 0" rotation="0 0 -90" radius-bottom="0.03" radius-top="0.055" height="0.6" material="color: #c8924f"></a-cone>
     </a-entity>
     <!-- mira al centro -->
-    <a-ring position="0 0 -1" radius-inner="0.012" radius-outer="0.02" material="color: #ffffff; shader: flat"></a-ring>
+    <a-ring id="mira" position="0 0 -1" radius-inner="0.012" radius-outer="0.02" material="color: #ffffff; shader: flat"></a-ring>
     <!-- puntaje dentro de la escena (para VR) -->
     <a-text id="hudVR" visible="false" value="Puntaje: 0     Vidas: 3" position="0 0.42 -1.5" align="center" width="1.6" color="#ffd166"></a-text>
   </a-entity>
 
   <!-- Texto de inicio dentro de la escena (VR) -->
-  <a-text id="textoVR" visible="false" value="METEORITOS EN ATACAMA. Batea los meteoritos con el control. Aprieta el gatillo para empezar"
+  <a-text id="textoVR" visible="false" value=""
           position="0 1.8 -3" align="center" width="4" color="#ffffff" wrap-count="34"></a-text>
 
-  <!-- Controles de VR: un bate en cada mano (apunta hacia adelante del control) -->
-  <a-entity class="mano" meta-touch-controls="hand: right; model: false" vive-controls="hand: right; model: false" windows-motion-controls="hand: right; model: false">
-    <a-cylinder position="0 0 -0.12" rotation="-90 0 0" radius="0.022" height="0.24" material="color: #3a2414"></a-cylinder>
-    <a-cone position="0 0 -0.52" rotation="-90 0 0" radius-bottom="0.03" radius-top="0.055" height="0.6" material="color: #c8924f"></a-cone>
-    <a-entity class="punta" position="0 0 -0.85"></a-entity>
-  </a-entity>
-  <a-entity class="mano" meta-touch-controls="hand: left; model: false" vive-controls="hand: left; model: false" windows-motion-controls="hand: left; model: false">
-    <a-cylinder position="0 0 -0.12" rotation="-90 0 0" radius="0.022" height="0.24" material="color: #3a2414"></a-cylinder>
-    <a-cone position="0 0 -0.52" rotation="-90 0 0" radius-bottom="0.03" radius-top="0.055" height="0.6" material="color: #c8924f"></a-cone>
-    <a-entity class="punta" position="0 0 -0.85"></a-entity>
-  </a-entity>
 </a-scene>
 </body>
 </html>
