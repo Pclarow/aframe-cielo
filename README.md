@@ -14,17 +14,22 @@ Estás de noche en el desierto de Atacama, con cielo estrellado, cerros y un obs
 - Si un meteorito toca el suelo deja un cráter y pierdes una vida (hay 3).
 - Cada golpe sube la dificultad: caen más rápido y más seguido.
 
-## Con anteojos de realidad virtual
+## Con anteojos de realidad virtual (probado en Meta Quest 2)
 
-1. Abre la página en el navegador del visor (por ejemplo Meta Quest) y toca el botón **VR** de abajo a la derecha.
-2. Aprieta el **gatillo** de un control para empezar.
-3. Cada control tiene un bate: **batea moviendo el brazo** de verdad. El golpe cuenta si el bate toca el meteorito con un swing; si es fuerte, es jonrón. El control vibra al golpear.
-4. Los meteoritos pasan a la altura del pecho, al alcance del bate.
+1. Abre la página en el navegador del visor y toca el botón **VR** (abajo a la derecha).
+2. El juego empieza solo después de una cuenta de 3 segundos.
+3. Hay un bate en cada mano (izquierda y derecha): **batea moviendo el brazo**, sin apretar botones. Si el swing es fuerte, es jonrón. El control vibra al golpear.
+4. Al perder, empieza una nueva partida en 10 segundos (o al tiro con el gatillo).
+
+## Explosiones en el aire
+
+Si un meteorito bateado pasa cerca de uno que va cayendo, chocan y explotan los dos: chispas, una onda de luz y +2 puntos.
 
 ## Cómo está hecho
 
 - **A-Frame 1.5**: escena, cámara con look-controls y el bate como hijo de la cámara.
 - **Componente `estrellas`**: genera 900 estrellas al azar en una cúpula.
 - **Componente `juego`**: crea los meteoritos con Three.js, los mueve en cada `tick`, detecta el golpe (distancia y ángulo respecto a la mirada) y anima el swing del bate.
-- **Controles de VR** (`meta-touch-controls`, `vive-controls`, `windows-motion-controls`): el bate es un segmento desde el control hasta la punta; se mide la velocidad de la punta y se revisa si toca algún meteorito (`THREE.Line3`).
+- **Controles de VR** (WebXR de Three.js, `renderer.xr.getControllerGrip`): cada control lleva un bate; se mide la velocidad de la punta y se revisa si el segmento del bate toca algún meteorito (`THREE.Line3`).
+- **Explosiones**: partículas (chispas) que salen en direcciones al azar y se apagan en 1 segundo.
 - **Web Audio API**: sonido del golpe y del choque generados con ruido filtrado.

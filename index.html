@@ -73,6 +73,8 @@
 
       this.geo = new THREE.IcosahedronGeometry(0.45, 0);
       this.geoCola = new THREE.ConeGeometry(0.4, 3, 8, 1, true);
+      this.geoChispa = new THREE.TetrahedronGeometry(0.18);
+      this.particulas = [];              // chispas de las explosiones
 
       const batear = () => { if (this.jugando) this.batear(); };
       window.addEventListener('keydown', (e) => { if (e.code === 'Space') batear(); });
@@ -242,6 +244,23 @@
       this.actualizarHud();
     },
 
+    // explosión en el aire: chispas de colores, una onda de luz y un estruendo
+    explotar(pos) {
+      sonido('choque');
+      const colores = [0xffe066, 0xff7a1a, 0xff3b1f, 0xffffff];
+      for (let i = 0; i < 28; i++) {
+        const chispa = new THREE.Mesh(this.geoChispa, new THREE.MeshBasicMaterial({ color: colores[i % 4], transparent: true }));
+        chispa.position.copy(pos);
+        const dir = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.3, Math.random() - 0.5).normalize();
+        this.el.object3D.add(chispa);
+        this.particulas.push({ malla: chispa, vel: dir.multiplyScalar(6 + Math.random() * 8), vida: 0 });
+      }
+      const onda = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.8 }));
+      onda.position.copy(pos);
+      this.el.object3D.add(onda);
+      this.particulas.push({ malla: onda, vel: new THREE.Vector3(), vida: 0, onda: true });
+    },
+
     // VR: el bate es un segmento desde el control hasta la punta; si toca un meteorito, lo golpea
     bateoVR(dt) {
       for (const bate of this.batesVR) {
@@ -302,8 +321,33 @@
       const s = this.tiempoSwing < 1 ? Math.sin(this.tiempoSwing * Math.PI / 2) : 0;
       this.pivote.rotation.set(0, THREE.MathUtils.degToRad(-35 + s * 230), THREE.MathUtils.degToRad(40 * (1 - s)));
 
+      // chispas de las explosiones (se mueven y se apagan en 1 segundo)
+      for (let i = this.particulas.length - 1; i >= 0; i--) {
+        const p = this.particulas[i];
+        p.vida += dt;
+        if (p.onda) { p.malla.scale.setScalar(1 + p.vida * 12); p.malla.material.opacity = Math.max(0, 0.8 - p.vida * 2); }
+        else { p.vel.y -= 6 * dt; p.malla.position.addScaledVector(p.vel, dt); p.malla.rotation.x += dt * 8; p.malla.material.opacity = Math.max(0, 1 - p.vida); }
+        if (p.vida > 1) { this.el.object3D.remove(p.malla); p.malla.material.dispose(); this.particulas.splice(i, 1); }
+      }
+
       if (!this.jugando) return;
       if (this.modoVR) this.bateoVR(dt);
+
+      // un meteorito bateado que choca con uno que va cayendo: ¡explotan los dos en el aire!
+      for (const a of this.meteoritos) {
+        if (!a.bateado || a.exploto) continue;
+        for (const b of this.meteoritos) {
+          if (b.bateado || b.exploto) continue;
+          if (a.malla.position.distanceTo(b.malla.position) < 1.2) {
+            a.exploto = b.exploto = true;
+            this.explotar(a.malla.position.clone().add(b.malla.position).multiplyScalar(0.5));
+            this.puntos += 2;
+            this.mostrarAviso('¡EXPLOSIÓN EN EL AIRE! +2', '#ff9f1c');
+            this.actualizarHud();
+            break;
+          }
+        }
+      }
 
       // aparecen meteoritos cada vez más seguido
       this.proximo -= dt;
@@ -319,9 +363,9 @@
         m.malla.position.addScaledVector(m.vel, dt);
         m.roca.rotation.x += dt * 4; m.roca.rotation.y += dt * 3;
         const fuera = m.bateado && m.vida > 6;
-        const cayo = !m.bateado && m.malla.position.y <= 0.3;
+        const cayo = !m.bateado && !m.exploto && m.malla.position.y <= 0.3;
         if (cayo) this.chocar(m);
-        if (cayo || fuera || m.malla.position.y < -5) {
+        if (cayo || fuera || m.exploto || m.malla.position.y < -5) {
           this.el.object3D.remove(m.malla);
           this.meteoritos.splice(i, 1);
         }
